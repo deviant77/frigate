@@ -3,15 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { useApiHost } from '../../api';
 import { isNullOrUndefined } from '../../utils/objectUtils';
 
+import 'videojs-seek-buttons';
+import 'video.js/dist/video-js.css';
+import 'videojs-seek-buttons/dist/videojs-seek-buttons.css';
+
+import videojs, { VideoJsPlayer } from 'video.js';
+
 interface OnTimeUpdateEvent {
   timestamp: number;
   isPlaying: boolean;
-}
-
-interface VideoProperties {
-  posterUrl: string;
-  videoUrl: string;
-  height: number;
 }
 
 interface HistoryVideoProps {
@@ -32,68 +32,39 @@ export const HistoryVideo = ({
   onPlay,
 }: HistoryVideoProps) => {
   const apiHost = useApiHost();
-  const videoRef = useRef<HTMLVideoElement|null>(null);
-  const [videoHeight, setVideoHeight] = useState<number>(0);
-  const [videoProperties, setVideoProperties] = useState<VideoProperties>({
-    posterUrl: '',
-    videoUrl: '',
-    height: 0,
-  });
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  const currentVideo = videoRef.current;
-  if (currentVideo && !videoHeight) {
-    const currentVideoHeight = currentVideo.offsetHeight;
-    if (currentVideoHeight > 0) {
-      setVideoHeight(currentVideoHeight);
-    }
-  }
+  const [video, setVideo] = useState<VideoJsPlayer>();
 
   useEffect(() => {
-    const idExists = !isNullOrUndefined(id);
-    if (idExists) {
-      if (videoRef.current && !videoRef.current.paused) {
-        videoRef.current = null;
-      }
-
-      setVideoProperties({
-        posterUrl: `${apiHost}/api/events/${id}/snapshot.jpg`,
-        videoUrl: `${apiHost}/vod/event/${id}/index.m3u8`,
-        height: videoHeight,
-      });
-    } else {
-      setVideoProperties({
-        posterUrl: '',
-        videoUrl: '',
-        height: 0,
-      });
+    let video: VideoJsPlayer
+    if (videoRef.current) {
+      video = videojs(videoRef.current, {})
+      setVideo(video)
     }
-  }, [id, videoHeight, videoRef, apiHost]);
+    () => video?.dispose()
+  }, [videoRef]);
 
   useEffect(() => {
-    const playVideo = (video: HTMLMediaElement) => video.play();
-
-    const attemptPlayVideo = (video: HTMLMediaElement) => {
-      const videoHasNotLoaded = video.readyState <= 1;
-      if (videoHasNotLoaded) {
-        video.oncanplay = () => {
-          playVideo(video);
-        };
-        video.load();
-      } else {
-        playVideo(video);
-      }
-    };
-
-    const video = videoRef.current;
-    const videoExists = !isNullOrUndefined(video);
-    if (video && videoExists) {
-      if (videoIsPlaying) {
-        attemptPlayVideo(video);
-      } else {
-        video.pause();
-      }
+    if (!video) {
+      return
     }
-  }, [videoIsPlaying, videoRef]);
+
+
+    if (!id) {
+      video.pause()
+      return
+    }
+
+    video.src({
+      src: `${apiHost}/vod/event/${id}/index.m3u8`,
+      type: 'application/vnd.apple.mpegurl',
+    });
+    video.poster(`${apiHost}/api/events/${id}/snapshot.jpg`);
+    if (videoIsPlaying) {
+      video.play();
+    }
+  }, [video, id]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -111,32 +82,38 @@ export const HistoryVideo = ({
         isPlaying: videoIsPlaying,
         timestamp: target.currentTime,
       };
-
       onTimeUpdate && onTimeUpdate(timeUpdateEvent);
     },
     [videoIsPlaying, onTimeUpdate]
   );
 
-  const videoPropertiesIsUndefined = isNullOrUndefined(videoProperties);
-  if (videoPropertiesIsUndefined) {
-    return <div style={{ height: `${videoHeight}px`, width: '100%' }} />;
-  }
+  useEffect(() => {
+    if (video && video.readyState() >= 1) {
+      if (videoIsPlaying) {
+        video.play()
+      } else {
+        video.pause()
+      }
+    }
+  }, [video, videoIsPlaying])
 
-  const { posterUrl, videoUrl, height } = videoProperties;
+  const onLoad = useCallback(() => {
+    if (video && video.readyState() >= 1 && videoIsPlaying) {
+      video.play()
+    }
+  }, [video, videoIsPlaying])
+  
   return (
-    <video
-      ref={videoRef}
-      key={posterUrl}
-      onTimeUpdate={onTimeUpdateHandler}
-      onPause={onPause}
-      onPlay={onPlay}
-      poster={posterUrl}
-      preload='metadata'
-      controls
-      style={height ? { minHeight: `${height}px` } : {}}
-      playsInline
-    >
-      <source type='application/vnd.apple.mpegurl' src={videoUrl} />
-    </video>
+    <div data-vjs-player>
+      <video
+        ref={videoRef}
+        onTimeUpdate={onTimeUpdateHandler}
+        onLoadedMetadata={onLoad}
+        onPause={onPause}
+        onPlay={onPlay}
+        className="video-js vjs-fluid"
+        data-setup="{}"
+      />
+    </div>
   );
 };
